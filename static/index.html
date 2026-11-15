@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Mật Merkle - Hellman (Knapsack Cryptosystem) Demo</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- ================= HEADER ================= -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="brand-icon">🔐</div>
+                <div class="brand-title">
+                    <h1>Hệ Mật Merkle – Hellman (Knapsack)</h1>
+                    <div class="brand-subtitle">Demo Mã hóa đầu cuối (E2EE) giữa Alice & Bob qua Máy chủ trung gian</div>
+                </div>
+            </div>
+
+            <!-- View Navigation Tabs -->
+            <div class="view-tabs">
+                <button class="tab-btn active" data-view="dual">📺 Màn hình đôi (Dual View)</button>
+                <button class="tab-btn" data-view="alice">👩 Alice</button>
+                <button class="tab-btn" data-view="bob">👨 Bob</button>
+                <button class="tab-btn" data-view="server">🌐 Máy chủ (Wire Sniffer)</button>
+                <button class="tab-btn" data-view="theory">📚 Lý thuyết & Ví dụ</button>
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div class="quick-actions">
+                <button id="btnQuickSetup" class="btn btn-primary btn-sm" title="Tự động sinh khóa và kết nối cả 2 bên để thử nghiệm ngay">
+                    ⚡ Thiết lập nhanh
+                </button>
+                <button id="btnLoadWiki" class="btn btn-secondary btn-sm" title="Nạp bộ khóa mẫu chuẩn từ bài báo / Wikipedia">
+                    📖 Khóa mẫu Wikipedia
+                </button>
+                <button id="btnResetAll" class="btn btn-danger btn-sm" title="Xóa toàn bộ tin nhắn và khóa trên máy chủ">
+                    🗑️ Làm mới
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ================= MAIN CONTENT ================= -->
+    <main class="main-content">
+
+        <!-- ================= BACKEND STATUS BANNER ================= -->
+        <div id="backendBanner" class="backend-banner banner-checking">
+            <div class="banner-content">
+                <span class="banner-icon" id="bannerIcon">🔄</span>
+                <div class="banner-text-box">
+                    <span class="banner-title" id="bannerTitle">Đang kiểm tra kết nối Backend...</span>
+                    <span class="banner-desc" id="bannerDesc">Đang kết nối tới máy chủ Python tại http://localhost:5000</span>
+                </div>
+            </div>
+            <div class="banner-action">
+                <button id="btnCheckBackend" class="btn btn-secondary btn-sm">🔄 Kiểm tra lại</button>
+            </div>
+        </div>
+
+        <!-- ================= DUAL VIEW (DEFAULT) ================= -->
+        <div id="viewDual" class="dual-view-grid">
+
+            <!-- ================= ALICE PANEL ================= -->
+            <section class="client-card client-alice" id="aliceContainer">
+                <div class="card-header">
+                    <div class="user-identity">
+                        <div class="avatar avatar-alice">A</div>
+                        <div class="user-info">
+                            <h2>Alice (Client)</h2>
+                            <span id="aliceStatusBadge" class="badge badge-warning"><span class="badge-dot"></span> Chưa có khóa</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" id="btnGenAliceKeys">🎲 Sinh khóa ngẫu nhiên</button>
+                </div>
+
+                <div class="card-body">
+                    <!-- Alice Private Key Box (Bí mật ở Client) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>🔑 Khóa riêng của Alice (BÍ MẬT - Lưu tại Client)</span>
+                            <span class="badge badge-danger">Không gửi Server</span>
+                        </div>
+                        <div class="key-meta-grid">
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Modulus (q):</span>
+                                <span class="key-meta-val" id="aliceKeyQ">-</span>
+                            </div>
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Nhân tử (r):</span>
+                                <span class="key-meta-val" id="aliceKeyR">-</span>
+                            </div>
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Nghịch đảo r⁻¹:</span>
+                                <span class="key-meta-val" id="aliceKeyRInv">-</span>
+                            </div>
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Tổng dãy Σw:</span>
+                                <span class="key-meta-val" id="aliceKeySumW">-</span>
+                            </div>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 2px;">Dãy siêu tăng w (8 phần tử):</div>
+                        <div class="key-field" id="aliceKeyW">[Chưa tạo khóa]</div>
+                    </div>
+
+                    <!-- Alice Public Key Box (Đăng ký lên Server) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>🌐 Khóa công khai của Alice (β)</span>
+                            <span id="alicePubStatus" class="badge badge-info">Chưa tải lên</span>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 2px;">β = (r × wᵢ) mod q :</div>
+                        <div class="key-field" id="aliceKeyBeta">[Chưa có]</div>
+                        <button class="btn btn-secondary btn-sm" id="btnUploadAliceKey" style="width: 100%; margin-top: 4px;">
+                            📤 Gửi Khóa công khai lên Máy chủ trung gian
+                        </button>
+                    </div>
+
+                    <!-- Bob Public Key Box (Lấy từ Server) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>📥 Khóa công khai Bob (Dùng để mã hóa gửi Bob)</span>
+                            <span id="alicePeerKeyStatus" class="badge badge-warning">Chưa có</span>
+                        </div>
+                        <div class="key-field" id="alicePeerKeyBeta">[Chưa có khóa của Bob]</div>
+                        <button class="btn btn-secondary btn-sm" id="btnFetchBobKeyForAlice" style="width: 100%; margin-top: 4px;">
+                            🔄 Lấy Khóa công khai Bob từ Máy chủ
+                        </button>
+                    </div>
+
+                    <!-- Alice Chat Box -->
+                    <div class="chat-window">
+                        <div class="messages-list" id="aliceMessagesList">
+                            <div style="color: var(--text-dim); font-size: 0.8rem; text-align: center; margin-top: 20px;">
+                                Chưa có tin nhắn nào. Nhập tin nhắn phía dưới để bắt đầu gửi cho Bob!
+                            </div>
+                        </div>
+                        <div class="chat-input-bar">
+                            <input type="text" id="aliceInputMsg" class="chat-input" placeholder="Nhập tin nhắn gửi Bob (ví dụ: Hello Bob!)...">
+                            <button class="btn btn-alice" id="btnAliceSend">Mã hóa & Gửi ➔</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= INTERMEDIARY SERVER / WIRE SNIFFER PANEL ================= -->
+            <section class="server-card" id="serverContainer">
+                <div class="card-header">
+                    <div class="user-identity">
+                        <div class="avatar avatar-server">🌐</div>
+                        <div class="user-info">
+                            <h2>Máy chủ trung gian & Kênh truyền</h2>
+                            <span class="badge badge-success"><span class="badge-dot"></span> Đang trực tuyến (E2EE Relay)</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" id="btnRefreshWire">🔄 Làm mới gói tin</button>
+                </div>
+
+                <div class="card-body">
+                    <!-- Network Diagram -->
+                    <div class="wire-diagram">
+                        <div class="diagram-node">
+                            <div class="avatar avatar-alice" style="width: 28px; height: 28px; font-size: 0.8rem;">A</div>
+                            <span style="color: var(--color-alice);">Alice</span>
+                        </div>
+                        <div class="diagram-arrow">
+                            <span>Khóa công khai & Ciphertext</span>
+                            <div class="arrow-line"></div>
+                            <span style="font-size: 0.68rem; color: #fbbf24;">🔒 Chỉ truyền bản mã (Số nguyên)</span>
+                        </div>
+                        <div class="diagram-node">
+                            <div class="avatar avatar-server" style="width: 28px; height: 28px; font-size: 0.8rem;">🌐</div>
+                            <span style="color: var(--color-server);">Server</span>
+                        </div>
+                        <div class="diagram-arrow">
+                            <span>Khóa công khai & Ciphertext</span>
+                            <div class="arrow-line"></div>
+                            <span style="font-size: 0.68rem; color: #fbbf24;">🔒 Không lưu bản rõ!</span>
+                        </div>
+                        <div class="diagram-node">
+                            <div class="avatar avatar-bob" style="width: 28px; height: 28px; font-size: 0.8rem;">B</div>
+                            <span style="color: var(--color-bob);">Bob</span>
+                        </div>
+                    </div>
+
+                    <!-- Server Public Key Directory (Danh bạ Khóa công khai) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>📋 Sổ lưu Khóa công khai trên Máy chủ (Public Directory)</span>
+                            <span class="badge badge-info" id="serverKeyCount">0 Khóa</span>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;" id="serverDirectoryList">
+                            <div style="font-size: 0.75rem; color: var(--text-dim); text-align: center; padding: 6px;">
+                                Chưa có bên nào tải khóa công khai lên máy chủ.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Wire Logs / Packet Sniffer -->
+                    <div class="key-box" style="margin-bottom: 0; padding: 0; overflow: hidden; border: 1px solid var(--border-subtle);">
+                        <div class="terminal-bar">
+                            <span class="term-dot dot-red"></span>
+                            <span class="term-dot dot-yellow"></span>
+                            <span class="term-dot dot-green"></span>
+                            <span class="term-title">sniffer@gateway: ~/network-packets</span>
+                            <span class="badge badge-warning" id="wirePacketCount" style="margin-left: auto;">0 Gói tin</span>
+                        </div>
+                        <div class="wire-logs-box" id="wireLogsList">
+                            <div style="color: var(--text-dim); font-size: 0.75rem; text-align: center; margin-top: 40px;">
+                                Đang lắng nghe đường truyền... Các gói tin mã hóa đi qua sẽ hiển thị tại đây.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Hacker / MITM Simulation -->
+                    <div class="key-box" style="border-color: rgba(239, 68, 68, 0.4); background-color: rgba(239, 68, 68, 0.04);">
+                        <div class="key-box-title" style="color: #f87171;">
+                            <span>⚠️ Mô phỏng tấn công đường truyền (Man-in-the-Middle)</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+                            Thử can thiệp/sửa đổi 1 số nguyên trong Ciphertext trên đường truyền để kiểm chứng tính toàn vẹn dữ liệu khi Bob giải mã:
+                        </div>
+                        <button class="btn btn-danger btn-sm" id="btnTamperLastMsg" style="width: 100%;">
+                            ⚡ Thay đổi gói tin cuối cùng trên đường truyền
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= BOB PANEL ================= -->
+            <section class="client-card client-bob" id="bobContainer">
+                <div class="card-header">
+                    <div class="user-identity">
+                        <div class="avatar avatar-bob">B</div>
+                        <div class="user-info">
+                            <h2>Bob (Client)</h2>
+                            <span id="bobStatusBadge" class="badge badge-warning"><span class="badge-dot"></span> Chưa có khóa</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" id="btnGenBobKeys">🎲 Sinh khóa ngẫu nhiên</button>
+                </div>
+
+                <div class="card-body">
+                    <!-- Bob Private Key Box (Bí mật ở Client) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>🔑 Khóa riêng của Bob (BÍ MẬT - Lưu tại Client)</span>
+                            <span class="badge badge-danger">Không gửi Server</span>
+                        </div>
+                        <div class="key-meta-grid">
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Modulus (q):</span>
+                                <span class="key-meta-val" id="bobKeyQ">-</span>
+                            </div>
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Nhân tử (r):</span>
+                                <span class="key-meta-val" id="bobKeyR">-</span>
+                            </div>
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Nghịch đảo r⁻¹:</span>
+                                <span class="key-meta-val" id="bobKeyRInv">-</span>
+                            </div>
+                            <div class="key-meta-item">
+                                <span class="key-meta-label">Tổng dãy Σw:</span>
+                                <span class="key-meta-val" id="bobKeySumW">-</span>
+                            </div>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 2px;">Dãy siêu tăng w (8 phần tử):</div>
+                        <div class="key-field" id="bobKeyW">[Chưa tạo khóa]</div>
+                    </div>
+
+                    <!-- Bob Public Key Box (Đăng ký lên Server) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>🌐 Khóa công khai của Bob (β)</span>
+                            <span id="bobPubStatus" class="badge badge-info">Chưa tải lên</span>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 2px;">β = (r × wᵢ) mod q :</div>
+                        <div class="key-field" id="bobKeyBeta">[Chưa có]</div>
+                        <button class="btn btn-secondary btn-sm" id="btnUploadBobKey" style="width: 100%; margin-top: 4px;">
+                            📤 Gửi Khóa công khai lên Máy chủ trung gian
+                        </button>
+                    </div>
+
+                    <!-- Alice Public Key Box (Lấy từ Server để trả lời Alice) -->
+                    <div class="key-box">
+                        <div class="key-box-title">
+                            <span>📥 Khóa công khai Alice (Dùng để mã hóa gửi Alice)</span>
+                            <span id="bobPeerKeyStatus" class="badge badge-warning">Chưa có</span>
+                        </div>
+                        <div class="key-field" id="bobPeerKeyBeta">[Chưa có khóa của Alice]</div>
+                        <button class="btn btn-secondary btn-sm" id="btnFetchAliceKeyForBob" style="width: 100%; margin-top: 4px;">
+                            🔄 Lấy Khóa công khai Alice từ Máy chủ
+                        </button>
+                    </div>
+
+                    <!-- Bob Chat Box -->
+                    <div class="chat-window">
+                        <div class="messages-list" id="bobMessagesList">
+                            <div style="color: var(--text-dim); font-size: 0.8rem; text-align: center; margin-top: 20px;">
+                                Chưa có tin nhắn nào. Đang chờ tin nhắn từ Alice...
+                            </div>
+                        </div>
+                        <div class="chat-input-bar">
+                            <input type="text" id="bobInputMsg" class="chat-input" placeholder="Bob trả lời Alice...">
+                            <button class="btn btn-bob" id="btnBobSend">Trả lời ➔</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- ================= THEORY & WIKIPEDIA VIEW ================= -->
+        <div id="viewTheory" class="theory-card" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <h2 style="font-size: 1.3rem; color: #38bdf8;">Toán học & Nguyên lý Hệ Mật Merkle – Hellman (Knapsack)</h2>
+                <button class="btn btn-secondary btn-sm" onclick="switchView('dual')">✕ Đóng lý thuyết</button>
+            </div>
+
+            <div>
+                <h3 style="color: #fbbf24; margin-bottom: 8px;">1. Bài toán Xếp Ba Lô (Subset Sum Problem)</h3>
+                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.6;">
+                    Cho một tập hợp các số nguyên dương $A = \{a_1, a_2, \dots, a_n\}$ và một số nguyên mục tiêu $S$. Hãy tìm một dãy nhị phân $b = (b_1, b_2, \dots, b_n) \in \{0, 1\}^n$ sao cho:
+                </p>
+                <div class="math-formula-box" style="margin: 8px 0; text-align: center;">
+                    $$\sum_{i=1}^{n} b_i \cdot a_i = S$$
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.6;">
+                    Trong trường hợp tổng quát, bài toán này là <strong>NP-đầy đủ (NP-complete)</strong>, không thể giải được trong thời gian đa thức khi $n$ lớn.
+                </p>
+            </div>
+
+            <div>
+                <h3 style="color: #34d399; margin-bottom: 8px;">2. "Cửa sập" (Trapdoor) Dãy Siêu Tăng</h3>
+                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.6;">
+                    Một dãy $w = (w_1, w_2, \dots, w_n)$ được gọi là <strong>dãy siêu tăng (superincreasing sequence)</strong> nếu mỗi phần tử lớn hơn tổng của tất cả các phần tử đứng trước nó:
+                </p>
+                <div class="math-formula-box" style="margin: 8px 0; text-align: center;">
+                    $$w_{k} > \sum_{i=1}^{k-1} w_i \quad (\forall k \ge 2)$$
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.6;">
+                    <strong>Ưu điểm:</strong> Bài toán Subset Sum với dãy siêu tăng có thể giải cực kỳ nhanh bằng <em>thuật toán tham lam (Greedy algorithm)</em> trong độ phức tạp $O(n)$ từ phần tử lớn nhất $w_n$ về $w_1$.
+                </p>
+            </div>
+
+            <div>
+                <h3 style="color: #60a5fa; margin-bottom: 8px;">3. Quy trình Tạo khóa, Mã hóa và Giải mã Merkle-Hellman</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 10px;">
+                    <div class="key-box">
+                        <div style="font-weight: 700; color: #f87171; margin-bottom: 6px;">A. Khởi tạo Khóa riêng & Công khai</div>
+                        <ul style="font-size: 0.82rem; color: var(--text-muted); padding-left: 18px; line-height: 1.6;">
+                            <li>Chọn dãy siêu tăng $w = (w_1, \dots, w_n)$.</li>
+                            <li>Chọn số nguyên $q > \sum w_i$.</li>
+                            <li>Chọn số nguyên $r \in [2, q-1]$ sao cho $\gcd(r, q) = 1$.</li>
+                            <li>Tính $r^{-1} \pmod q$ bằng thuật toán Euclid mở rộng.</li>
+                            <li><strong>Khóa riêng:</strong> $(w, q, r, r^{-1})$ (giữ bí mật tuyệt đối).</li>
+                            <li><strong>Khóa công khai:</strong> $\beta_i = (r \cdot w_i) \pmod q$ (công khai cho mọi người).</li>
+                        </ul>
+                    </div>
+
+                    <div class="key-box">
+                        <div style="font-weight: 700; color: #38bdf8; margin-bottom: 6px;">B. Quá trình Mã hóa (Người gửi)</div>
+                        <ul style="font-size: 0.82rem; color: var(--text-muted); padding-left: 18px; line-height: 1.6;">
+                            <li>Người gửi lấy khóa công khai $\beta$ của người nhận.</li>
+                            <li>Chuyển ký tự thành 8 bit $b = (b_1, b_2, \dots, b_8)$.</li>
+                            <li>Tính Ciphertext (số nguyên):
+                                <div style="color: #38bdf8; font-weight: 600; margin: 4px 0;">$c = \sum_{i=1}^{8} b_i \cdot \beta_i$</div>
+                            </li>
+                            <li>Gửi số $c$ qua mạng. Kẻ nghe lén chỉ thấy $c$ và $\beta$, đối mặt với bài toán Subset Sum tổng quát (NP-đầy đủ)!</li>
+                        </ul>
+                    </div>
+
+                    <div class="key-box">
+                        <div style="font-weight: 700; color: #a855f7; margin-bottom: 6px;">C. Quá trình Giải mã (Người nhận)</div>
+                        <ul style="font-size: 0.82rem; color: var(--text-muted); padding-left: 18px; line-height: 1.6;">
+                            <li>Người nhận dùng khóa bí mật $r^{-1}$ và $q$ để đưa bản mã về bài toán siêu tăng:
+                                <div style="color: #a855f7; font-weight: 600; margin: 4px 0;">$c' = (c \cdot r^{-1}) \pmod q$</div>
+                            </li>
+                            <li>Dùng thuật toán tham lam trên dãy $w$ để tìm lại các bit $b_i$:
+                                <div>- Nếu $w_i \le \text{remaining}$, thì $b_i = 1$, trừ đi $w_i$. Ngược lại $b_i = 0$.</div>
+                            </li>
+                            <li>Ghép các bit thành byte ban đầu $\rightarrow$ Ký tự ASCII gốc.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h3 style="color: #f59e0b; margin-bottom: 8px;">4. Ví dụ Kinh Điển từ Wikipedia (Được lập trình sẵn trong hệ thống)</h3>
+                <div class="math-formula-box" style="font-size: 0.82rem;">
+                    <strong>Dãy siêu tăng:</strong> $w = [2, 7, 11, 21, 42, 89, 180, 354]$ (Tổng = 671)<br>
+                    <strong>Modulus:</strong> $q = 881$ ($> 671$)<br>
+                    <strong>Hệ số nhân:</strong> $r = 588$ ($\gcd(588, 881) = 1$)<br>
+                    <strong>Nghịch đảo:</strong> $r^{-1} \pmod q = 442$<br>
+                    <strong>Khóa công khai $\beta$:</strong> $[295, 592, 301, 14, 28, 353, 120, 236]$<br>
+                    <br>
+                    <strong>Mã hóa ký tự 'a' (ASCII 97 = 01100001₂):</strong><br>
+                    $c = 0\times295 + 1\times592 + 1\times301 + 0\times14 + 0\times28 + 0\times353 + 0\times120 + 1\times236 = 592 + 301 + 236 = 1129$<br>
+                    <br>
+                    <strong>Giải mã 1129:</strong><br>
+                    $c' = (1129 \times 442) \pmod{881} = 499018 \pmod{881} = 372$<br>
+                    Thuật toán tham lam trên $w$ tìm ra tập $\{354, 11, 7\}$ $\rightarrow$ Bit $01100001_2$ = 97 = 'a'!
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ================= STEP-BY-STEP TRACE MODAL ================= -->
+    <div id="traceModalBackdrop" class="trace-modal-backdrop">
+        <div class="trace-modal">
+            <div class="trace-modal-header">
+                <h3 id="traceModalTitle" style="font-size: 1.1rem; color: #38bdf8;">Phân Tích Toán Học Chi Tiết Từng Bước</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeTraceModal()">✕ Đóng</button>
+            </div>
+            <div class="trace-modal-body" id="traceModalBody">
+                <!-- Nội dung bảng phân tích động sẽ được chèn vào đây -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= TOAST CONTAINER ================= -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- ================= FOOTER ================= -->
+    <footer class="app-footer">
+        Đồ án An Toàn Thông Tin & An Ninh Mạng • Thử nghiệm Hệ Mật Merkle - Hellman (Public-Key Cryptosystem)
+    </footer>
+
+    <!-- Thư viện mã hóa Merkle-Hellman phía Client -->
+    <script src="js/merkle_hellman.js"></script>
+    <!-- Logic điều khiển giao diện và đồng bộ máy chủ -->
+    <script src="js/app.js"></script>
+</body>
+</html>
+
