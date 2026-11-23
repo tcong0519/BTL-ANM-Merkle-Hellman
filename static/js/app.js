@@ -135,10 +135,12 @@ async function checkBackendConnection() {
     const title = document.getElementById("bannerTitle");
     const desc = document.getElementById("bannerDesc");
 
-    banner.className = "backend-banner banner-checking";
-    icon.textContent = "🔄";
-    title.textContent = "Đang kiểm tra kết nối Backend...";
-    desc.textContent = `Đang kết nối tới máy chủ Python tại ${API_BASE || 'cổng hiện tại'}...`;
+    if (banner) {
+        banner.className = "backend-banner banner-checking";
+        if (icon) icon.textContent = "🔄";
+        if (title) title.textContent = "Đang kiểm tra kết nối Backend...";
+        if (desc) desc.textContent = `Đang kết nối tới máy chủ Python tại ${API_BASE || 'cổng hiện tại'}...`;
+    }
 
     try {
         const controller = new AbortController();
@@ -151,10 +153,12 @@ async function checkBackendConnection() {
 
         if (res.ok) {
             AppState.backendOnline = true;
-            banner.className = "backend-banner banner-connected";
-            icon.textContent = "🟢";
-            title.textContent = "ĐÃ KẾT NỐI MÁY CHỦ PYTHON TRUNG GIAN";
-            desc.textContent = "Hệ thống đang truyền tin mã hóa E2EE qua máy chủ thực tế (http://localhost:5000)";
+            if (banner) {
+                banner.className = "backend-banner banner-connected";
+                if (icon) icon.textContent = "🟢";
+                if (title) title.textContent = "ĐÃ KẾT NỐI MÁY CHỦ PYTHON TRUNG GIAN";
+                if (desc) desc.textContent = "Hệ thống đang truyền tin mã hóa E2EE qua máy chủ thực tế (http://localhost:5000)";
+            }
             fetchServerPublicKeys();
             fetchWireLogs();
             return true;
@@ -165,10 +169,12 @@ async function checkBackendConnection() {
 
     // Nếu không kết nối được -> Chuyển sang chế độ Local Fallback
     AppState.backendOnline = false;
-    banner.className = "backend-banner banner-offline";
-    icon.textContent = "⚠️";
-    title.textContent = "CHƯA BẬT MÁY CHỦ PYTHON (CHẾ ĐỘ MÔ PHỎNG CỤC BỘ)";
-    desc.textContent = "Để kết nối máy chủ thực: Mở terminal chạy 'python server.py' (hoặc nhấp đúp 'run_server.bat'). Hệ thống đã tự động bật mô phỏng để bạn bấm thử tất cả chức năng ngay!";
+    if (banner) {
+        banner.className = "backend-banner banner-offline";
+        if (icon) icon.textContent = "⚠️";
+        if (title) title.textContent = "CHƯA BẬT MÁY CHỦ PYTHON (CHẾ ĐỘ MÔ PHỎNG CỤC BỘ)";
+        if (desc) desc.textContent = "Để kết nối máy chủ thực: Mở terminal chạy 'python server.py' (hoặc nhấp đúp 'run_server.bat'). Hệ thống đã tự động bật mô phỏng để bạn bấm thử tất cả chức năng ngay!";
+    }
     renderLocalServerDirectory();
     return false;
 }
@@ -1361,12 +1367,15 @@ document.addEventListener("DOMContentLoaded", () => {
         showToast("Đã cập nhật nhật ký đường truyền!", "info");
     });
     document.getElementById("btnTamperLastMsg").addEventListener("click", tamperLastMessage);
-    document.getElementById("btnCheckBackend").addEventListener("click", () => {
-        checkBackendConnection().then(online => {
-            if (online) showToast("Đã kết nối thành công tới Máy chủ Python!", "success");
-            else showToast("Chưa thấy Máy chủ Python chạy. Hãy chạy 'python server.py'!", "warning");
+    const btnCheckBackend = document.getElementById("btnCheckBackend");
+    if (btnCheckBackend) {
+        btnCheckBackend.addEventListener("click", () => {
+            checkBackendConnection().then(online => {
+                if (online) showToast("Đã kết nối thành công tới Máy chủ Python!", "success");
+                else showToast("Chưa thấy Máy chủ Python chạy. Hãy chạy 'python server.py'!", "warning");
+            });
         });
-    });
+    }
 
     // Sự kiện chuyển Tab xem
     document.querySelectorAll(".tab-btn").forEach(btn => {
