@@ -1,47 +1,78 @@
 /**
- * Logic Ứng Dụng Web Demo Hệ Mật Merkle-Hellman
- * Hỗ trợ cả 2 chế độ:
- * 1. Chế độ Kết nối Máy chủ Python (Backend E2EE qua http://localhost:5000)
- * 2. Chế độ Giả lập Cục bộ (Local E2EE Fallback) - Tự động hoạt động ngay cả khi chưa bật server
+ * LOGIC ĐIỀU KHIỂN GIAO DIỆN & TƯƠNG TÁC WEB DEMO MERKLE-HELLMAN
+ * =============================================================
+ * Môn học: An toàn Thông tin & An ninh Mạng (BTL_ANM)
+ * 
+ * Kiến trúc hoạt động:
+ *   1. Quản lý trạng thái 3 thực thể độc lập:
+ *      - Client Alice (Tự quản lý khóa bí mật của Alice, tin nhắn gửi/nhận).
+ *      - Client Bob (Tự quản lý khóa bí mật của Bob, tin nhắn gửi/nhận).
+ *      - Intermediary Server (Máy chủ lưu danh bạ khóa công khai & chuyển tiếp gói tin mã hóa).
+ *   2. Hỗ trợ 2 chế độ linh hoạt:
+ *      - Chế độ Online: Kết nối máy chủ Python thực tế qua http://localhost:5000.
+ *      - Chế độ Offline Fallback: Tự động chạy mô phỏng trong bộ nhớ trình duyệt nếu chưa bật server,
+ *        đảm bảo người dùng bấm bất kỳ nút nào cũng hoạt động mượt mà không bị đơ.
+ *   3. Trực quan hóa toán học: Cung cấp Modal soi chi tiết từng bước tính toán.
  */
 
-// Xác định địa chỉ API backend phù hợp (cho cả http://localhost và file:///)
+// Tự động xác định địa chỉ API (tương thích cả khi chạy qua http:// và file:///)
 const API_BASE = (window.location.protocol.startsWith("http")) ? "" : "http://localhost:5000";
 
-// ================= GLOBAL STATE =================
+// ============================================================
+// PHẦN 1: QUẢN LÝ TRẠNG THÁI TOÀN CỤC (GLOBAL APPLICATION STATE)
+// ============================================================
 const AppState = {
+    // Trạng thái kết nối với máy chủ Python (true = online, false = offline fallback)
     backendOnline: false,
+
+    // Trạng thái máy khách của Alice
     alice: {
         username: "Alice",
-        privateKey: null,      // w, q, r, r_inv, sum_w (BÍ MẬT)
-        publicKey: null,       // beta
-        peerPublicKey: null,   // beta của Bob
-        messages: [],          // Lịch sử tin nhắn
-        lastProcessedId: 0
+        privateKey: null,      // Khóa riêng: w, q, r, r_inv, sum_w (BÍ MẬT - Không rời Client)
+        publicKey: null,       // Khóa công khai beta của Alice (Đã gửi lên Server)
+        peerPublicKey: null,   // Khóa công khai beta của Bob (Lấy từ Server về để mã hóa gửi Bob)
+        messages: [],          // Lịch sử tin nhắn của Alice (kèm trace toán học)
+        lastProcessedId: 0     // ID tin nhắn đã xử lý gần nhất
     },
+
+    // Trạng thái máy khách của Bob
     bob: {
         username: "Bob",
-        privateKey: null,      // w, q, r, r_inv, sum_w (BÍ MẬT)
-        publicKey: null,       // beta
-        peerPublicKey: null,   // beta của Alice
-        messages: [],          // Lịch sử tin nhắn
-        lastProcessedId: 0
+        privateKey: null,      // Khóa riêng: w, q, r, r_inv, sum_w (BÍ MẬT - Không rời Client)
+        publicKey: null,       // Khóa công khai beta của Bob (Đã gửi lên Server)
+        peerPublicKey: null,   // Khóa công khai beta của Alice (Lấy từ Server về để mã hóa gửi Alice)
+        messages: [],          // Lịch sử tin nhắn của Bob (kèm trace toán học)
+        lastProcessedId: 0     // ID tin nhắn đã xử lý gần nhất
     },
+
+    // Trạng thái nhật ký gói tin đường truyền (Wire Sniffer Logs)
     wire: {
         logs: [],
         lastLogId: 0
     },
-    // Bộ nhớ giả lập máy chủ cục bộ (dùng khi backend Python chưa bật)
+
+    // Bộ nhớ máy chủ giả lập cục bộ (dùng khi máy chủ Python chưa được bật)
     localServer: {
         users: {},
         messages: [],
         msgCounter: 0,
         logCounter: 0
     },
+
+    // Chế độ xem hiện tại ('dual', 'alice', 'bob', 'server', 'theory')
     currentView: "dual"
 };
 
-// ================= UTILITIES: TOAST & FORMAT =================
+
+// ============================================================
+// PHẦN 2: CÁC TIỆN ÍCH GIAO DIỆN (TOAST NOTIFICATION & FORMAT)
+// ============================================================
+
+/**
+ * Hiển thị thông báo Toast góc dưới màn hình.
+ * @param {string} message - Nội dung thông báo
+ * @param {'info'|'success'|'warning'|'error'} type - Loại thông báo
+ */
 function showToast(message, type = "info") {
     const container = document.getElementById("toastContainer");
     if (!container) return;
@@ -63,12 +94,41 @@ function showToast(message, type = "info") {
     }, 3500);
 }
 
+/**
+ * Định dạng mảng số nguyên thành chuỗi [x1, x2, ...] đẹp mắt
+ */
 function formatSeq(seq) {
     if (!seq || !seq.length) return "[]";
     return `[${seq.join(", ")}]`;
 }
 
-// ================= KIỂM TRA KẾT NỐI BACKEND =================
+/**
+ * Thoát các ký tự đặc biệt trong HTML để tránh lỗi XSS
+ */
+function escapeHtml(text) {
+    if (!text) return "";
+    return text.replace(/[&<>"']/g, function (m) {
+        switch (m) {
+            case "&": return "&amp;";
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            case '"': return "&quot;";
+            case "'": return "&#039;";
+            default: return m;
+        }
+    });
+}
+
+
+// ============================================================
+// PHẦN 3: KIỂM TRA & QUẢN LÝ KẾT NỐI BACKEND PYTHON
+// ============================================================
+
+/**
+ * Tự động thăm dò kết nối tới Máy chủ Python trung gian.
+ * - Nếu máy chủ đang chạy: Cập nhật thanh trạng thái màu xanh (Online).
+ * - Nếu máy chủ chưa chạy: Cập nhật màu vàng thông báo chế độ Fallback và hướng dẫn bật server.
+ */
 async function checkBackendConnection() {
     const banner = document.getElementById("backendBanner");
     const icon = document.getElementById("bannerIcon");
@@ -100,9 +160,10 @@ async function checkBackendConnection() {
             return true;
         }
     } catch (err) {
-        // Backend không phản hồi
+        // Backend không phản hồi hoặc cổng chưa mở
     }
 
+    // Nếu không kết nối được -> Chuyển sang chế độ Local Fallback
     AppState.backendOnline = false;
     banner.className = "backend-banner banner-offline";
     icon.textContent = "⚠️";
@@ -112,7 +173,14 @@ async function checkBackendConnection() {
     return false;
 }
 
-// ================= TRACE MODAL: CHI TIẾT TOÁN HỌC =================
+
+// ============================================================
+// PHẦN 4: CỬA SỔ SOI BƯỚC TOÁN HỌC (TRACE MODAL VISUALIZER)
+// ============================================================
+
+/**
+ * Mở cửa sổ popup Modal hiển thị bảng phân tích toán học chi tiết
+ */
 function openTraceModal(title, contentHtml) {
     const backdrop = document.getElementById("traceModalBackdrop");
     const titleEl = document.getElementById("traceModalTitle");
@@ -123,6 +191,9 @@ function openTraceModal(title, contentHtml) {
     backdrop.classList.add("show");
 }
 
+/**
+ * Đóng cửa sổ popup Modal
+ */
 function closeTraceModal() {
     const backdrop = document.getElementById("traceModalBackdrop");
     backdrop.classList.remove("show");
@@ -130,7 +201,14 @@ function closeTraceModal() {
 
 window.closeTraceModal = closeTraceModal;
 
-// ================= ALICE KEY & MESSAGE LOGIC =================
+
+// ============================================================
+// PHẦN 5: CHỨC NĂNG CỦA ALICE (CLIENT A)
+// ============================================================
+
+/**
+ * Bước 1: Alice tự sinh cặp khóa Merkle-Hellman ngẫu nhiên tại máy của mình.
+ */
 function generateAliceKeys() {
     try {
         const keys = MerkleHellmanCrypto.generateKeyPair(8);
@@ -143,6 +221,10 @@ function generateAliceKeys() {
     }
 }
 
+/**
+ * Bước 2: Alice gửi Khóa công khai beta lên máy chủ trung gian.
+ * Lưu ý: Khóa riêng bí mật (w, q, r, r_inv) được giữ lại ở trình duyệt, KHÔNG gửi lên server.
+ */
 async function uploadAlicePublicKey() {
     if (!AppState.alice.publicKey) {
         showToast("Alice chưa có khóa công khai! Hãy bấm Sinh khóa trước.", "warning");
@@ -173,7 +255,7 @@ async function uploadAlicePublicKey() {
         }
     }
 
-    // Fallback: Lưu vào bộ nhớ cục bộ
+    // Chế độ mô phỏng cục bộ (Fallback)
     AppState.localServer.users["Alice"] = {
         public_key: AppState.alice.publicKey,
         registered_at: new Date().toLocaleTimeString()
@@ -189,6 +271,9 @@ async function uploadAlicePublicKey() {
     renderLocalServerDirectory();
 }
 
+/**
+ * Bước 3: Alice lấy Khóa công khai của Bob từ máy chủ trung gian về.
+ */
 async function fetchBobKeyForAlice() {
     if (AppState.backendOnline) {
         try {
@@ -209,7 +294,7 @@ async function fetchBobKeyForAlice() {
         }
     }
 
-    // Fallback: Lấy từ local server
+    // Chế độ mô phỏng cục bộ (Fallback)
     const bobData = AppState.localServer.users["Bob"];
     if (bobData && bobData.public_key) {
         AppState.alice.peerPublicKey = bobData.public_key;
@@ -222,12 +307,18 @@ async function fetchBobKeyForAlice() {
     }
 }
 
+/**
+ * Bước 4: Alice soạn tin nhắn, mã hóa bằng Khóa công khai của Bob và gửi đi.
+ * - Ký tự -> 8 bit nhị phân.
+ * - Nhân với beta của Bob -> Dãy các số nguyên lớn ciphertext.
+ * - Gửi các số nguyên này qua máy chủ.
+ */
 async function sendAliceMessage() {
     const input = document.getElementById("aliceInputMsg");
     const text = input.value.trim();
     if (!text) return;
 
-    // Kiểm tra Khóa công khai của Bob
+    // Kiểm tra đã có Khóa công khai của Bob chưa
     if (!AppState.alice.peerPublicKey) {
         await fetchBobKeyForAlice();
         if (!AppState.alice.peerPublicKey) {
@@ -240,6 +331,7 @@ async function sendAliceMessage() {
         // Mã hóa tại Client của Alice bằng Khóa công khai của Bob
         const encResult = MerkleHellmanCrypto.encrypt(text, AppState.alice.peerPublicKey);
 
+        // Trường hợp Online: Gửi số nguyên lớn qua máy chủ Python
         if (AppState.backendOnline) {
             try {
                 const res = await fetch(`${API_BASE}/api/send`, {
@@ -276,7 +368,7 @@ async function sendAliceMessage() {
             }
         }
 
-        // Fallback: Xử lý trực tiếp cục bộ
+        // Trường hợp Offline Fallback: Mô phỏng trong bộ nhớ
         AppState.localServer.msgCounter++;
         const msgId = AppState.localServer.msgCounter;
         const msgRecord = {
@@ -345,6 +437,9 @@ async function sendAliceMessage() {
     }
 }
 
+/**
+ * Cập nhật các trường hiển thị khóa của Alice trên giao diện
+ */
 function updateAliceUI() {
     const priv = AppState.alice.privateKey;
     if (priv) {
@@ -361,6 +456,9 @@ function updateAliceUI() {
     }
 }
 
+/**
+ * Vẽ danh sách tin nhắn trong khung chat của Alice
+ */
 function renderAliceMessages() {
     const listEl = document.getElementById("aliceMessagesList");
     listEl.innerHTML = "";
@@ -394,11 +492,15 @@ function renderAliceMessages() {
     listEl.scrollTop = listEl.scrollHeight;
 }
 
+/**
+ * Hiển thị Modal chi tiết từng bước tính toán khi bấm nút "Xem chi tiết phép tính"
+ */
 window.viewAliceTrace = function (msgId) {
     const msg = AppState.alice.messages.find(m => m.id === msgId);
     if (!msg || !msg.trace) return;
 
     if (msg.sender === "Alice") {
+        // Bảng chi tiết mã hóa
         let html = `
             <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">
                 Tin nhắn bản rõ: <strong style="color: #38bdf8;">"${escapeHtml(msg.plaintext)}"</strong><br>
@@ -437,7 +539,14 @@ window.viewAliceTrace = function (msgId) {
     }
 };
 
-// ================= BOB KEY & MESSAGE LOGIC =================
+
+// ============================================================
+// PHẦN 6: CHỨC NĂNG CỦA BOB (CLIENT B)
+// ============================================================
+
+/**
+ * Bước 1: Bob tự sinh cặp khóa Merkle-Hellman ngẫu nhiên tại máy của mình.
+ */
 function generateBobKeys() {
     try {
         const keys = MerkleHellmanCrypto.generateKeyPair(8);
@@ -450,6 +559,9 @@ function generateBobKeys() {
     }
 }
 
+/**
+ * Bước 2: Bob gửi Khóa công khai beta lên máy chủ trung gian.
+ */
 async function uploadBobPublicKey() {
     if (!AppState.bob.publicKey) {
         showToast("Bob chưa có khóa công khai! Hãy bấm Sinh khóa trước.", "warning");
@@ -480,7 +592,7 @@ async function uploadBobPublicKey() {
         }
     }
 
-    // Fallback: Lưu vào local server
+    // Chế độ mô phỏng cục bộ (Fallback)
     AppState.localServer.users["Bob"] = {
         public_key: AppState.bob.publicKey,
         registered_at: new Date().toLocaleTimeString()
@@ -496,6 +608,9 @@ async function uploadBobPublicKey() {
     renderLocalServerDirectory();
 }
 
+/**
+ * Bước 3: Bob lấy Khóa công khai của Alice từ máy chủ về để trả lời tin nhắn.
+ */
 async function fetchAliceKeyForBob() {
     if (AppState.backendOnline) {
         try {
@@ -516,7 +631,7 @@ async function fetchAliceKeyForBob() {
         }
     }
 
-    // Fallback: Lấy từ local server
+    // Chế độ mô phỏng cục bộ (Fallback)
     const aliceData = AppState.localServer.users["Alice"];
     if (aliceData && aliceData.public_key) {
         AppState.bob.peerPublicKey = aliceData.public_key;
@@ -529,6 +644,9 @@ async function fetchAliceKeyForBob() {
     }
 }
 
+/**
+ * Bước 4: Bob trả lời Alice (dùng Khóa công khai của Alice để mã hóa).
+ */
 async function sendBobMessage() {
     const input = document.getElementById("bobInputMsg");
     const text = input.value.trim();
@@ -581,7 +699,7 @@ async function sendBobMessage() {
             }
         }
 
-        // Fallback local
+        // Chế độ mô phỏng cục bộ (Fallback)
         AppState.localServer.msgCounter++;
         const msgId = AppState.localServer.msgCounter;
         const msgRecord = {
@@ -612,7 +730,7 @@ async function sendBobMessage() {
         });
         renderBobMessages();
 
-        // Alice giải mã
+        // Alice tự động giải mã
         if (AppState.alice.privateKey) {
             try {
                 const decResult = MerkleHellmanCrypto.decrypt(encResult.ciphertext, AppState.alice.privateKey);
@@ -650,6 +768,9 @@ async function sendBobMessage() {
     }
 }
 
+/**
+ * Cập nhật hiển thị khóa của Bob trên giao diện
+ */
 function updateBobUI() {
     const priv = AppState.bob.privateKey;
     if (priv) {
@@ -666,6 +787,9 @@ function updateBobUI() {
     }
 }
 
+/**
+ * Vẽ danh sách tin nhắn trong khung chat của Bob
+ */
 function renderBobMessages() {
     const listEl = document.getElementById("bobMessagesList");
     listEl.innerHTML = "";
@@ -752,6 +876,9 @@ window.viewBobTrace = function (msgId) {
     }
 };
 
+/**
+ * Hiển thị bảng giải thích từng bước giải mã bằng Thuật toán tham lam trên dãy siêu tăng
+ */
 function renderDecryptionTraceModal(recipientName, msg) {
     const priv = recipientName === "Bob" ? AppState.bob.privateKey : AppState.alice.privateKey;
     let html = `
@@ -797,7 +924,14 @@ function renderDecryptionTraceModal(recipientName, msg) {
     openTraceModal(`${recipientName}: Chi tiết Giải Mã Tin Nhắn #${msg.id}`, html);
 }
 
-// ================= SERVER PUBLIC DIRECTORY & WIRE LOGS =================
+
+// ============================================================
+// PHẦN 7: DANH BẠ MÁY CHỦ & BẮT GÓI TIN ĐƯỜNG TRUYỀN (WIRE)
+// ============================================================
+
+/**
+ * Lấy danh sách Khóa công khai từ máy chủ trung gian
+ */
 async function fetchServerPublicKeys() {
     if (!AppState.backendOnline) {
         renderLocalServerDirectory();
@@ -905,18 +1039,26 @@ async function fetchWireLogs() {
     }
 }
 
-// ================= MESSAGE POLLING KHI DÙNG SERVER THỰC TẾ =================
+
+// ============================================================
+// PHẦN 8: CHU KỲ NHẬN & GIẢI MÃ TIN NHẮN TỰ ĐỘNG (POLLING)
+// ============================================================
+
+/**
+ * Định kỳ kiểm tra tin nhắn mới trên máy chủ trung gian và tự động giải mã tại Client
+ */
 async function pollIncomingMessages() {
     if (!AppState.backendOnline) return;
 
     try {
-        // Kiểm tra tin nhắn Bob
+        // Kiểm tra tin nhắn Bob nhận được từ Alice
         if (AppState.bob.privateKey) {
             const resBob = await fetch(`${API_BASE}/api/messages?user=Bob&since_id=${AppState.bob.lastProcessedId}`);
             const dataBob = await resBob.json();
             if (dataBob.status === "success" && dataBob.messages.length > 0) {
                 dataBob.messages.forEach(msg => {
                     AppState.bob.lastProcessedId = Math.max(AppState.bob.lastProcessedId, msg.id);
+                    // Bob giải mã bằng khóa bí mật của Bob
                     try {
                         const decResult = MerkleHellmanCrypto.decrypt(msg.ciphertext, AppState.bob.privateKey);
                         AppState.bob.messages.push({
@@ -935,7 +1077,7 @@ async function pollIncomingMessages() {
                             id: msg.id,
                             sender: msg.sender,
                             recipient: "Bob",
-                            plaintext: "[LỖI GIẢI MÃ: Gói tin bị hỏng]",
+                            plaintext: "[LỖI GIẢI MÃ: Gói tin bị hỏng hoặc bị sửa đổi]",
                             error: decErr.message,
                             ciphertext: msg.ciphertext,
                             timestamp: msg.timestamp,
@@ -948,7 +1090,7 @@ async function pollIncomingMessages() {
             }
         }
 
-        // Kiểm tra tin nhắn Alice
+        // Kiểm tra tin nhắn Alice nhận được từ Bob
         if (AppState.alice.privateKey) {
             const resAlice = await fetch(`${API_BASE}/api/messages?user=Alice&since_id=${AppState.alice.lastProcessedId}`);
             const dataAlice = await resAlice.json();
@@ -990,32 +1132,43 @@ async function pollIncomingMessages() {
     }
 }
 
-// ================= QUICK SETUP & PRESETS =================
+
+// ============================================================
+// PHẦN 9: CÁC TIỆN ÍCH THỰC NGHIỆM & KỊCH BẢN DEMO
+// ============================================================
+
+/**
+ * Nút "⚡ Thiết lập nhanh": Tự động sinh cặp khóa cho cả Alice và Bob,
+ * trao đổi khóa công khai qua server và điền sẵn tin nhắn mẫu.
+ */
 async function runQuickSetup() {
     showToast("Đang tự động khởi tạo cặp khóa cho Alice & Bob...", "info");
 
-    // 1. Sinh khóa cho Alice
+    // 1. Sinh khóa cho Alice & tải lên server
     generateAliceKeys();
     await uploadAlicePublicKey();
 
-    // 2. Sinh khóa cho Bob
+    // 2. Sinh khóa cho Bob & tải lên server
     generateBobKeys();
     await uploadBobPublicKey();
 
-    // 3. Trao đổi khóa công khai
+    // 3. Trao đổi khóa công khai qua server
     await fetchBobKeyForAlice();
     await fetchAliceKeyForBob();
 
-    // Điền sẵn tin nhắn mẫu
+    // 4. Điền sẵn tin nhắn mẫu
     document.getElementById("aliceInputMsg").value = "Hello Bob! Merkle-Hellman E2EE";
 
     showToast("⚡ Thiết lập nhanh hoàn tất! Đã điền sẵn tin nhắn mẫu. Hãy bấm 'Mã hóa & Gửi'!", "success");
 }
 
+/**
+ * Nút "📖 Khóa mẫu Wikipedia": Nạp bộ khóa chuẩn theo giáo trình.
+ */
 async function loadWikipediaPreset() {
     showToast("Đang nạp bộ khóa chuẩn từ Wikipedia...", "info");
 
-    // Khóa Wikipedia cho Bob
+    // Gán khóa Wikipedia cho Bob
     const wiki = MerkleHellmanCrypto.getWikipediaKeys();
     AppState.bob.privateKey = wiki.privateKey;
     AppState.bob.publicKey = wiki.publicKey;
@@ -1035,6 +1188,9 @@ async function loadWikipediaPreset() {
     showToast("Đã nạp Khóa Wikipedia cho Bob và chuẩn bị sẵn ký tự 'a' ở ô chat của Alice!", "success");
 }
 
+/**
+ * Nút "🗑️ Làm mới": Xóa sạch toàn bộ tin nhắn và khóa trên hệ thống.
+ */
 async function resetAllData() {
     if (!confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử tin nhắn và làm mới dữ liệu?")) return;
 
@@ -1063,6 +1219,10 @@ async function resetAllData() {
     showToast("Đã làm mới toàn bộ dữ liệu demo!", "success");
 }
 
+/**
+ * Nút "⚡ Mô phỏng can thiệp gói tin (MITM)": Sửa đổi 1 số nguyên trong ciphertext
+ * trên đường truyền để kiểm chứng phản ứng giải mã thất bại ở bên nhận.
+ */
 async function tamperLastMessage() {
     let lastMsg = null;
     if (AppState.backendOnline) {
@@ -1084,6 +1244,7 @@ async function tamperLastMessage() {
         return;
     }
 
+    // Giả lập hacker sửa đổi số nguyên ciphertext đầu tiên
     const tamperedCipher = [...lastMsg.ciphertext];
     tamperedCipher[0] = tamperedCipher[0] + 777;
 
@@ -1111,7 +1272,14 @@ async function tamperLastMessage() {
     showToast(`⚡ Đã sửa đổi Ciphertext của gói tin #${lastMsg.id} trên đường truyền!`, "warning");
 }
 
-// ================= VIEW SWITCHING & URL ROUTING =================
+
+// ============================================================
+// PHẦN 10: ĐIỀU HƯỚNG TAB & KHỞI TẠO SỰ KIỆN (EVENT LISTENERS)
+// ============================================================
+
+/**
+ * Chuyển đổi giữa các chế độ xem giao diện
+ */
 function switchView(viewName) {
     AppState.currentView = viewName;
 
@@ -1159,23 +1327,9 @@ function switchView(viewName) {
 
 window.switchView = switchView;
 
-function escapeHtml(text) {
-    if (!text) return "";
-    return text.replace(/[&<>"']/g, function (m) {
-        switch (m) {
-            case "&": return "&amp;";
-            case "<": return "&lt;";
-            case ">": return "&gt;";
-            case '"': return "&quot;";
-            case "'": return "&#039;";
-            default: return m;
-        }
-    });
-}
-
-// ================= INITIALIZATION & EVENT LISTENERS =================
+// Đăng ký toàn bộ sự kiện khi tài liệu DOM sẵn sàng
 document.addEventListener("DOMContentLoaded", () => {
-    // Buttons Alice
+    // Sự kiện cho các nút của Alice
     document.getElementById("btnGenAliceKeys").addEventListener("click", generateAliceKeys);
     document.getElementById("btnUploadAliceKey").addEventListener("click", uploadAlicePublicKey);
     document.getElementById("btnFetchBobKeyForAlice").addEventListener("click", fetchBobKeyForAlice);
@@ -1184,7 +1338,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.key === "Enter") sendAliceMessage();
     });
 
-    // Buttons Bob
+    // Sự kiện cho các nút của Bob
     document.getElementById("btnGenBobKeys").addEventListener("click", generateBobKeys);
     document.getElementById("btnUploadBobKey").addEventListener("click", uploadBobPublicKey);
     document.getElementById("btnFetchAliceKeyForBob").addEventListener("click", fetchAliceKeyForBob);
@@ -1193,7 +1347,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.key === "Enter") sendBobMessage();
     });
 
-    // Buttons Quick Actions
+    // Sự kiện cho các nút Thao tác nhanh (Quick Actions)
     document.getElementById("btnQuickSetup").addEventListener("click", runQuickSetup);
     document.getElementById("btnLoadWiki").addEventListener("click", loadWikipediaPreset);
     document.getElementById("btnResetAll").addEventListener("click", resetAllData);
@@ -1214,14 +1368,14 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Tab buttons
+    // Sự kiện chuyển Tab xem
     document.querySelectorAll(".tab-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             switchView(btn.dataset.view);
         });
     });
 
-    // Kiểm tra URL params nếu mở riêng từng người dùng (?user=alice hoặc ?user=bob)
+    // Kiểm tra URL parameters (ví dụ: ?user=alice hoặc ?user=bob nếu mở tab riêng)
     const urlParams = new URLSearchParams(window.location.search);
     const userParam = urlParams.get("user");
     if (userParam === "alice") {
@@ -1232,10 +1386,10 @@ document.addEventListener("DOMContentLoaded", () => {
         switchView("server");
     }
 
-    // Kiểm tra kết nối Backend
+    // Kiểm tra kết nối Backend ngay khi mở trang
     checkBackendConnection();
 
-    // Chu kỳ cập nhật tự động (Polling mỗi 1.5 giây)
+    // Chu kỳ cập nhật tự động (Polling mỗi 1.5 giây khi online)
     setInterval(() => {
         if (AppState.backendOnline) {
             pollIncomingMessages();
@@ -1243,7 +1397,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }, 1500);
 
-    // Chu kỳ cập nhật danh bạ khóa mỗi 4 giây
+    // Chu kỳ cập nhật danh bạ khóa mỗi 4 giây khi online
     setInterval(() => {
         if (AppState.backendOnline) {
             fetchServerPublicKeys();

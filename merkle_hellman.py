@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ứng dụng thử nghiệm Hệ mật Merkle – Hellman (Knapsack Cryptosystem)
------------------------------------------------------------------
-Hệ mật khóa công khai dựa trên bài toán Subset Sum (NP-complete).
-Khóa riêng: dãy siêu tăng (superincreasing sequence).
-Khóa công khai: biến đổi modulo của dãy siêu tăng.
-
-Tác giả: Ứng dụng demo giáo dục
+HỆ MẬT MÃ KHÓA CÔNG KHAI MERKLE – HELLMAN (KNAPSACK CRYPTOSYSTEM)
+================================================================
+Môn học: An toàn Thông tin & An ninh Mạng (BTL_ANM)
+Nguyên lý: Dựa trên bài toán Xếp Ba Lô (Subset Sum Problem) - thuộc lớp bài toán NP-đầy đủ.
+Ý tưởng:
+  - Khóa riêng (Private Key): Dãy siêu tăng (superincreasing sequence) w, modulus q, số nhân r, r⁻¹.
+    Bài toán con với dãy siêu tăng có thể giải cực nhanh bằng Thuật toán tham lam (Greedy).
+  - Khóa công khai (Public Key): Dãy β = (r * w_i) mod q.
+    Đối với người ngoài, dãy β trông như bài toán Knapsack tổng quát không có cấu trúc, cực kỳ khó giải.
 """
 
 import math
@@ -17,11 +19,15 @@ from typing import List, Tuple, Optional
 
 
 # ============================================================
-# CÁC HÀM HỖ TRỢ TOÁN HỌC
+# PHẦN 1: CÁC THUẬT TOÁN TOÁN HỌC NỀN TẢNG
 # ============================================================
 
 def gcd(a: int, b: int) -> int:
-    """Ước chung lớn nhất (Euclid)."""
+    """
+    Thuật toán Euclid tìm Ước chung lớn nhất (Greatest Common Divisor).
+    Nguyên lý: gcd(a, b) = gcd(b, a mod b) cho đến khi b = 0.
+    Dùng để kiểm tra hai số a và b có nguyên tố cùng nhau không (gcd == 1).
+    """
     while b:
         a, b = b, a % b
     return a
@@ -29,8 +35,11 @@ def gcd(a: int, b: int) -> int:
 
 def extended_gcd(a: int, b: int) -> Tuple[int, int, int]:
     """
-    Thuật toán Euclid mở rộng.
-    Trả về (g, x, y) sao cho a*x + b*y = g = gcd(a, b).
+    Thuật toán Euclid mở rộng (Extended Euclidean Algorithm).
+    Tìm nghiệm nguyên (x, y) cho phương trình đồng nhất Bézout:
+        a * x + b * y = gcd(a, b)
+    Trả về: (gcd, x, y)
+    Được sử dụng làm nền tảng để tìm nghịch đảo modulo.
     """
     if a == 0:
         return b, 0, 1
@@ -39,15 +48,26 @@ def extended_gcd(a: int, b: int) -> Tuple[int, int, int]:
 
 
 def mod_inverse(a: int, m: int) -> int:
-    """Tìm nghịch đảo modulo của a theo modulo m (a * inv ≡ 1 mod m)."""
+    """
+    Tìm nghịch đảo modulo: Tìm số nguyên x sao cho (a * x) ≡ 1 (mod m).
+    
+    Quy trình:
+      - Bước 1: Gọi thuật toán Euclid mở rộng extended_gcd(a mod m, m).
+      - Bước 2: Kiểm tra ước chung lớn nhất g. Nếu g ≠ 1 thì không tồn tại nghịch đảo.
+      - Bước 3: Đưa x về khoảng dương [0, m - 1] bằng phép (x % m + m) % m.
+    """
     g, x, _ = extended_gcd(a % m, m)
     if g != 1:
         raise ValueError(f"Không tồn tại nghịch đảo modulo vì gcd({a}, {m}) = {g} ≠ 1")
-    return x % m
+    return (x % m + m) % m
 
 
 def is_superincreasing(seq: List[int]) -> bool:
-    """Kiểm tra dãy có phải siêu tăng không: mỗi phần tử > tổng các phần tử trước nó."""
+    """
+    Kiểm tra một dãy số có phải là dãy siêu tăng (superincreasing sequence) hay không.
+    Điều kiện: Mỗi phần tử thứ i phải LỚN HƠN tổng của tất cả các phần tử đứng trước nó:
+        w_k > sum(w_0, w_1, ..., w_{k-1}) với mọi k >= 1.
+    """
     total = 0
     for x in seq:
         if x <= total:
@@ -57,102 +77,142 @@ def is_superincreasing(seq: List[int]) -> bool:
 
 
 # ============================================================
-# LỚP CHÍNH: MERKLE-HELLMAN CRYPTOSYSTEM
+# PHẦN 2: LỚP CHÍNH - MERKLE-HELLMAN CRYPTOSYSTEM
 # ============================================================
 
 class MerkleHellman:
     """
-    Hệ mật Merkle-Hellman.
-
-    Khóa riêng (private key):
-        - w : dãy siêu tăng (superincreasing sequence)
-        - q : modulus (q > tổng của w)
-        - r : hệ số nhân (gcd(r, q) = 1)
-
-    Khóa công khai (public key):
-        - beta = (r * w_i) mod q   (i = 1..n)
+    Lớp triển khai trọn vẹn Hệ mật Merkle-Hellman.
+    
+    Cấu trúc cặp khóa:
+      1. Khóa riêng (Private Key):
+         - w     : Dãy siêu tăng bí mật [w_0, w_1, ..., w_{n-1}]
+         - q     : Modulus bí mật (phải lớn hơn tổng của dãy w)
+         - r     : Hệ số nhân bí mật (nguyên tố cùng nhau với q, tức gcd(r, q) = 1)
+         - r_inv : Nghịch đảo modulo của r theo q (r * r_inv ≡ 1 mod q)
+      2. Khóa công khai (Public Key):
+         - beta  : Dãy khóa công khai [beta_0, beta_1, ..., beta_{n-1}]
+                   với beta_i = (r * w_i) mod q
     """
 
     def __init__(self, n: int = 8, seed: Optional[int] = None):
         """
-        n     : độ dài khóa (số bit / số phần tử của dãy).
-        seed  : hạt giống ngẫu nhiên (để tái tạo kết quả).
+        Khởi tạo hệ thống Merkle-Hellman.
+        :param n: Độ dài khóa (số bit của 1 khối, mặc định 8 bit = 1 byte).
+        :param seed: Hạt giống ngẫu nhiên để tái tạo kết quả thử nghiệm nếu cần.
         """
         if n < 4:
-            raise ValueError("Độ dài khóa n phải ≥ 4")
+            raise ValueError("Độ dài khóa n phải ≥ 4 bit.")
         self.n = n
         if seed is not None:
             random.seed(seed)
 
-        self.w: List[int] = []          # dãy siêu tăng (private)
-        self.q: int = 0                 # modulus
-        self.r: int = 0                 # multiplier
-        self.r_inv: int = 0             # r^{-1} mod q
-        self.beta: List[int] = []       # khóa công khai
+        self.w: List[int] = []          # Dãy siêu tăng (Private)
+        self.q: int = 0                 # Modulus bí mật (Private)
+        self.r: int = 0                 # Số nhân bí mật (Private)
+        self.r_inv: int = 0             # Nghịch đảo r^-1 mod q (Private)
+        self.beta: List[int] = []       # Khóa công khai (Public)
 
+        # Tự động sinh cặp khóa khi khởi tạo
         self._generate_keys()
 
     # ----------------------------------------------------------
-    # Sinh khóa
+    # THUẬT TOÁN SINH CẶP KHÓA (5 BƯỚC)
     # ----------------------------------------------------------
     def _generate_superincreasing(self, n: int) -> List[int]:
-        """Sinh dãy siêu tăng ngẫu nhiên có n phần tử."""
+        """
+        Sinh ngẫu nhiên một dãy siêu tăng có n phần tử.
+        Quy tắc: Mỗi phần tử mới = tổng các phần tử trước + một số ngẫu nhiên dương.
+        """
         seq = []
         total = 0
-        # Phần tử đầu tiên nhỏ
-        current = random.randint(2, 10)
+        current = random.randint(2, 10) # Phần tử đầu tiên nhỏ (2..10)
         for _ in range(n):
-            # Mỗi phần tử tiếp theo lớn hơn tổng trước đó
             current = total + random.randint(1, max(3, total // 2 + 1))
             seq.append(current)
             total += current
         return seq
 
     def _generate_keys(self):
-        """Sinh khóa riêng và khóa công khai."""
-        # 1. Dãy siêu tăng
+        """
+        Thực hiện toàn bộ quy trình sinh cặp khóa Merkle-Hellman:
+        
+        Bước 1: Sinh dãy siêu tăng bí mật w gồm n phần tử.
+        Bước 2: Chọn số nguyên modulus q lớn hơn tổng tất cả các phần tử của w (q > sum(w)).
+        Bước 3: Chọn số nguyên nhân tử r trong khoảng [2, q - 1] sao cho gcd(r, q) = 1.
+        Bước 4: Tính nghịch đảo modulo r_inv = r⁻¹ mod q bằng thuật toán Euclid mở rộng.
+        Bước 5: Tạo khóa công khai beta với từng phần tử: beta_i = (r * w_i) mod q.
+        """
+        # Bước 1: Dãy siêu tăng bí mật (Private Key component)
         self.w = self._generate_superincreasing(self.n)
 
-        # 2. Modulus q > tổng dãy
+        # Bước 2: Modulus q bí mật (phải lớn hơn tổng dãy w để sau này phép chia dư không bị tràn)
         s = sum(self.w)
         self.q = s + random.randint(s // 2 + 1, s * 2)
 
-        # 3. Hệ số nhân r (nguyên tố cùng nhau với q)
+        # Bước 3: Hệ số nhân r (phải nguyên tố cùng nhau với q để tồn tại nghịch đảo modulo)
         while True:
             self.r = random.randint(2, self.q - 1)
             if gcd(self.r, self.q) == 1:
                 break
 
-        # 4. Nghịch đảo của r
+        # Bước 4: Tính nghịch đảo r^-1 theo modulo q
         self.r_inv = mod_inverse(self.r, self.q)
 
-        # 5. Khóa công khai beta_i = (r * w_i) mod q
+        # Bước 5: Tính Khóa công khai beta_i = (r * w_i) mod q (Public Key)
         self.beta = [(self.r * wi) % self.q for wi in self.w]
 
     # ----------------------------------------------------------
-    # Mã hóa / Giải mã
+    # THUẬT TOÁN MÃ HÓA (ENCRYPTION)
     # ----------------------------------------------------------
     def encrypt(self, plaintext_bits: List[int]) -> int:
         """
-        Mã hóa một khối bit (độ dài = n).
-        plaintext_bits: list[0/1] có đúng n phần tử.
-        Trả về ciphertext (số nguyên).
+        Mã hóa một khối nhị phân gồm n bit (ví dụ n = 8).
+        
+        Quy trình:
+          - Đầu vào: Mảng bit b = [b_0, b_1, ..., b_{n-1}] với b_i ∈ {0, 1}.
+          - Công thức: Tính tích vô hướng giữa mảng bit và Khóa công khai beta:
+                c = sum(b_i * beta_i) với i từ 0 đến n-1.
+          - Đầu ra: Số nguyên lớn ciphertext (c).
+          
+        * Lưu ý an ninh: Đối với kẻ nghe lén không biết w, q, r, việc tìm lại các bit b_i
+          từ số c và dãy beta tương đương với việc giải bài toán Subset Sum tổng quát (NP-đầy đủ).
         """
         if len(plaintext_bits) != self.n:
-            raise ValueError(f"Độ dài bản rõ phải đúng {self.n} bit")
+            raise ValueError(f"Độ dài bản rõ phải đúng {self.n} bit (hiện tại: {len(plaintext_bits)})")
         if any(b not in (0, 1) for b in plaintext_bits):
-            raise ValueError("Bản rõ chỉ được chứa 0 và 1")
+            raise ValueError("Bản rõ nhị phân chỉ được chứa các giá trị 0 hoặc 1")
 
+        # Phép tính tích vô hướng: c = Σ (b_i * beta_i)
         return sum(b * beta for b, beta in zip(plaintext_bits, self.beta))
 
+    # ----------------------------------------------------------
+    # THUẬT TOÁN GIẢI MÃ (DECRYPTION)
+    # ----------------------------------------------------------
     def decrypt(self, ciphertext: int) -> List[int]:
         """
-        Giải mã ciphertext về dãy bit.
+        Giải mã số nguyên ciphertext trở lại thành dãy n bit ban đầu.
+        
+        Quy trình 2 bước:
+          Bước 1: Đưa về bài toán con dãy siêu tăng (Áp dụng 'Cửa sập' Trapdoor):
+                  c' = (c * r_inv) mod q
+                  Chứng minh:
+                    c' = (sum(b_i * beta_i) * r_inv) mod q
+                       = (sum(b_i * r * w_i) * r_inv) mod q
+                       = sum(b_i * w_i * (r * r_inv)) mod q
+                       = sum(b_i * w_i) mod q
+                  Do q > sum(w), nên sum(b_i * w_i) < q. Phép mod q biến mất:
+                    c' = sum(b_i * w_i)  (tổng Subset Sum trên dãy siêu tăng w!)
+          
+          Bước 2: Dùng Thuật toán Tham lam (Greedy Knapsack) giải tìm mảng bit b:
+                  Duyệt từ phần tử lớn nhất w_{n-1} về phần tử nhỏ nhất w_0:
+                  - Nếu w_i <= remaining: đặt b_i = 1, trừ remaining đi w_i.
+                  - Ngược lại: đặt b_i = 0.
         """
-        # Biến đổi về bài toán siêu tăng
+        # Bước 1: Biến đổi ciphertext về bài toán siêu tăng c'
         c_prime = (ciphertext * self.r_inv) % self.q
 
-        # Giải bài toán subset-sum trên dãy siêu tăng (greedy)
+        # Bước 2: Thuật toán tham lam giải bài toán Subset Sum trên dãy siêu tăng
         bits = [0] * self.n
         remaining = c_prime
         for i in range(self.n - 1, -1, -1):
@@ -160,27 +220,33 @@ class MerkleHellman:
                 bits[i] = 1
                 remaining -= self.w[i]
 
+        # Kiểm tra tính toàn vẹn: nếu remaining != 0 nghĩa là ciphertext bị sai hoặc bị can thiệp
         if remaining != 0:
-            raise ValueError("Giải mã thất bại: không tìm được subset (có thể ciphertext bị lỗi)")
+            raise ValueError("Giải mã thất bại: Không tìm được tập con thỏa mãn (dữ liệu có thể bị lỗi).")
 
         return bits
 
     # ----------------------------------------------------------
-    # Xử lý văn bản (ASCII & UTF-8)
+    # XỬ LÝ VĂN BẢN (CHUYỂN ĐỔI CHUỖI ↔ KHỐI BIT)
     # ----------------------------------------------------------
     def text_to_bits(self, text: str) -> List[List[int]]:
         """
-        Chuyển chuỗi thành các khối bit độ dài n.
-        Mỗi byte (ASCII hoặc UTF-8) → 8 bit, sau đó chia thành khối n bit (padding 0 nếu cần).
+        Chuyển chuỗi văn bản thành danh sách các khối n bit.
+        Hỗ trợ đầy đủ cả mã ASCII chuẩn và tiếng Việt có dấu (UTF-8).
+        
+        Quy trình:
+          - Bước 1: Encode chuỗi thành danh sách byte UTF-8.
+          - Bước 2: Chuyển mỗi byte (0..255) thành chuỗi 8 bit nhị phân.
+          - Bước 3: Chia chuỗi bit thành các khối có độ dài n bit (padding '0' nếu thiếu).
         """
         raw_bytes = text.encode("utf-8")
         bit_string = "".join(f"{b:08b}" for b in raw_bytes)
 
-        # Chia thành các khối n bit
+        # Chia dòng bit liên tục thành các khối độ dài n
         blocks = []
         for i in range(0, len(bit_string), self.n):
             block = bit_string[i:i + self.n]
-            # Padding 0 ở cuối nếu thiếu
+            # Padding thêm bit 0 nếu khối cuối cùng không đủ n bit
             if len(block) < self.n:
                 block = block.ljust(self.n, "0")
             blocks.append([int(b) for b in block])
@@ -188,39 +254,50 @@ class MerkleHellman:
 
     def bits_to_text(self, blocks: List[List[int]]) -> str:
         """
-        Ghép các khối bit thành chuỗi ký tự (giải mã UTF-8 / ASCII).
+        Ghép danh sách các khối n bit trở lại thành chuỗi văn bản gốc UTF-8 / ASCII.
+        
+        Quy trình:
+          - Bước 1: Nối tất cả các khối bit thành chuỗi bit dài.
+          - Bước 2: Tách từng đoạn 8 bit chuyển thành giá trị số nguyên byte (0..255).
+          - Bước 3: Decode mảng byte thành chuỗi ký tự UTF-8.
         """
         bit_string = "".join("".join(str(b) for b in block) for block in blocks)
 
-        # Cắt thành từng nhóm 8 bit
         raw_bytes = bytearray()
         for i in range(0, len(bit_string), 8):
             byte = bit_string[i:i + 8]
             if len(byte) < 8:
                 break
             val = int(byte, 2)
-            if val == 0:          # padding hoặc kết thúc
+            if val == 0:          # Ký tự null hoặc padding
                 continue
             raw_bytes.append(val)
         return raw_bytes.decode("utf-8", errors="replace")
 
     def encrypt_text(self, text: str) -> List[int]:
-        """Mã hóa toàn bộ chuỗi văn bản → danh sách ciphertext."""
+        """
+        Mã hóa toàn bộ một chuỗi văn bản.
+        Trả về danh sách các số nguyên lớn ciphertext (mỗi khối bit tạo ra 1 số nguyên).
+        """
         blocks = self.text_to_bits(text)
         return [self.encrypt(block) for block in blocks]
 
     def decrypt_text(self, cipher_list: List[int]) -> str:
-        """Giải mã danh sách ciphertext → chuỗi văn bản."""
+        """
+        Giải mã toàn bộ danh sách số nguyên ciphertext trở lại thành chuỗi văn bản gốc.
+        """
         blocks = [self.decrypt(c) for c in cipher_list]
         return self.bits_to_text(blocks)
 
     # ----------------------------------------------------------
-    # Thông tin khóa
+    # XUẤT THÔNG TIN KHÓA
     # ----------------------------------------------------------
     def public_key(self) -> List[int]:
+        """Trả về Khóa công khai beta."""
         return self.beta.copy()
 
     def private_key(self) -> dict:
+        """Trả về Khóa riêng bí mật (w, q, r, r_inv)."""
         return {
             "w": self.w.copy(),
             "q": self.q,
@@ -229,74 +306,86 @@ class MerkleHellman:
         }
 
     def summary(self) -> str:
+        """Tóm tắt trực quan toàn bộ thông tin của cặp khóa."""
         lines = [
             "=" * 60,
             "  THÔNG TIN KHÓA HỆ MẬT MERKLE – HELLMAN",
             "=" * 60,
-            f"Độ dài khóa (n)          : {self.n}",
-            f"Dãy siêu tăng (w)        : {self.w}",
-            f"Modulus (q)              : {self.q}",
-            f"Hệ số nhân (r)           : {self.r}",
+            f"Độ dài khối (n)          : {self.n} bit",
+            f"Dãy siêu tăng bí mật (w) : {self.w}",
+            f"Tổng dãy w (sum_w)       : {sum(self.w)}",
+            f"Modulus bí mật (q)       : {self.q} (thỏa mãn q > {sum(self.w)})",
+            f"Hệ số nhân bí mật (r)    : {self.r} (nguyên tố cùng nhau với q)",
             f"Nghịch đảo r⁻¹ mod q     : {self.r_inv}",
             f"Khóa công khai (β)       : {self.beta}",
-            f"Tổng dãy siêu tăng      : {sum(self.w)}",
-            f"Kiểm tra siêu tăng      : {'✓ Đúng' if is_superincreasing(self.w) else '✗ Sai'}",
+            f"Kiểm tra dãy siêu tăng   : {'✓ Hợp lệ' if is_superincreasing(self.w) else '✗ Không hợp lệ'}",
             "=" * 60,
         ]
         return "\n".join(lines)
 
 
 # ============================================================
-# DEMO CỐ ĐỊNH (theo ví dụ Wikipedia)
+# PHẦN 3: BỘ DỮ LIỆU MẪU CHUẨN TỪ WIKIPEDIA (ĐỂ KIỂM CHỨNG)
 # ============================================================
 
 def demo_wikipedia():
-    """Chạy ví dụ kinh điển từ Wikipedia để kiểm chứng thuật toán."""
+    """
+    Chạy bộ dữ liệu mẫu kinh điển từ Wikipedia để kiểm chứng tính toán số học.
+    Khóa Wikipedia:
+      w = [2, 7, 11, 21, 42, 89, 180, 354]
+      q = 881, r = 588  --> r_inv = 442
+      beta = [295, 592, 301, 14, 28, 353, 120, 236]
+    """
     print("\n" + "═" * 60)
-    print("  DEMO THEO VÍ DỤ WIKIPEDIA")
+    print("  DEMO KIỂM CHỨNG THEO VÍ DỤ CHUẨN WIKIPEDIA")
     print("═" * 60)
 
-    # Khóa riêng cố định từ Wikipedia
-    # W = {2, 7, 11, 21, 42, 89, 180, 354}, q = 881, r = 588
     w = [2, 7, 11, 21, 42, 89, 180, 354]
     q = 881
     r = 588
 
+    # Tính r_inv và beta
     r_inv = mod_inverse(r, q)
     beta = [(r * wi) % q for wi in w]
 
-    print(f"Dãy siêu tăng w  = {w}")
-    print(f"Modulus q        = {q}")
-    print(f"Multiplier r     = {r}")
-    print(f"r⁻¹ mod q        = {r_inv}")
-    print(f"Khóa công khai β = {beta}")
-    print(f"(Wikipedia: β = [295, 592, 301, 14, 28, 353, 120, 236])")
+    print(f"1. Dãy siêu tăng bí mật w = {w}")
+    print(f"2. Modulus bí mật q       = {q}")
+    print(f"3. Hệ số nhân bí mật r    = {r}")
+    print(f"4. Nghịch đảo r⁻¹ mod q   = {r_inv} (Wikipedia: 442)")
+    print(f"5. Khóa công khai β       = {beta}")
+    print(f"   (Đối chiếu Wikipedia   : [295, 592, 301, 14, 28, 353, 120, 236])")
 
-    # Bản rõ 8 bit: 01100001  (ký tự 'a' = 97)
-    message = [0, 1, 1, 0, 0, 0, 0, 1]
-    print(f"\nBản rõ (bits)    = {message}  →  '{chr(int(''.join(map(str, message)), 2))}'")
+    # Bản rõ: Ký tự 'a' (ASCII 97 = 01100001)
+    message_bits = [0, 1, 1, 0, 0, 0, 0, 1]
+    char_val = chr(int("".join(map(str, message_bits)), 2))
+    print(f"\n[MÃ HÓA] Bản rõ nhị phân = {message_bits}  --> Ký tự: '{char_val}'")
 
-    # Mã hóa
-    cipher = sum(m * b for m, b in zip(message, beta))
-    print(f"Ciphertext       = {cipher}  (Wikipedia: 1129)")
+    # Mã hóa: c = Σ (b_i * beta_i)
+    cipher = sum(m * b for m, b in zip(message_bits, beta))
+    print(f"--> Ciphertext thu được   = {cipher}  (Wikipedia chuẩn: 1129)")
 
-    # Giải mã
+    # Giải mã bước 1: c' = (c * r_inv) mod q
     c_prime = (cipher * r_inv) % q
-    print(f"c' = c·r⁻¹ mod q = {c_prime}  (Wikipedia: 372)")
+    print(f"\n[GIẢI MÃ] Bước 1: c' = ({cipher} × {r_inv}) mod {q} = {c_prime}  (Wikipedia: 372)")
 
-    # Greedy
-    bits = [0] * 8
+    # Giải mã bước 2: Thuật toán tham lam
+    recovered_bits = [0] * 8
     remaining = c_prime
+    print("   Bước 2: Thuật toán tham lam trên dãy w:")
     for i in range(7, -1, -1):
         if w[i] <= remaining:
-            bits[i] = 1
+            recovered_bits[i] = 1
             remaining -= w[i]
-    print(f"Bản rõ giải được = {bits}")
-    print(f"Khớp với gốc?    : {'✓ Thành công' if bits == message else '✗ Thất bại'}")
+            print(f"     - w[{i}] = {w[i]:3d} <= {remaining + w[i]:3d} --> CHỌN (bit = 1), còn lại {remaining}")
+        else:
+            print(f"     - w[{i}] = {w[i]:3d} >  {remaining:3d} --> BỎ   (bit = 0)")
+
+    print(f"--> Bản rõ khôi phục được = {recovered_bits}")
+    print(f"--> Kết quả đối chiếu     : {'✓ THÀNH CÔNG (Khớp 100%)' if recovered_bits == message_bits else '✗ THẤT BẠI'}")
 
 
 # ============================================================
-# GIAO DIỆN CONSOLE
+# PHẦN 4: GIAO DIỆN DÒNG LỆNH (CONSOLE / TERMINAL)
 # ============================================================
 
 def print_banner():
@@ -329,9 +418,9 @@ def print_menu():
 def main():
     print_banner()
 
-    # Khởi tạo hệ thống mặc định n = 8
+    # Khởi tạo mặc định khóa 8 bit
     mh = MerkleHellman(n=8)
-    print("Đã sinh khóa mặc định với n = 8.")
+    print("Đã sinh khóa mặc định với n = 8 bit.")
     print(mh.summary())
 
     last_cipher: List[int] = []
@@ -346,7 +435,7 @@ def main():
 
         elif choice == "1":
             try:
-                n = int(input("Nhập độ dài khóa n (khuyến nghị 8–16): ").strip() or "8")
+                n = int(input("Nhập độ dài khóa n (khuyến nghị 8–16 bit): ").strip() or "8")
                 if n < 4 or n > 64:
                     print("n nên nằm trong khoảng 4–64.")
                     continue
@@ -372,9 +461,9 @@ def main():
                 last_cipher = cipher_list
                 print("\n─── KẾT QUẢ MÃ HÓA ───")
                 print(f"Bản rõ        : {text}")
-                print(f"Số khối      : {len(cipher_list)}")
+                print(f"Số khối (byte): {len(cipher_list)}")
                 print(f"Ciphertext   : {cipher_list}")
-                print("(Đã lưu ciphertext để dùng cho chức năng 4)")
+                print("(Đã lưu ciphertext để có thể dùng ngay cho chức năng 4)")
             except Exception as e:
                 print(f"Lỗi mã hóa: {e}")
 

@@ -1,11 +1,24 @@
 /**
- * Thư viện Mật mã Merkle-Hellman (Knapsack Cryptosystem) dành cho Web Client
- * Sử dụng BigInt để đảm bảo độ chính xác số học tuyệt đối.
+ * THƯ VIỆN MẬT MÃ MERKLE - HELLMAN PHÍA TRÌNH DUYỆT (CLIENT-SIDE)
+ * =============================================================
+ * Môn học: An toàn Thông tin & An ninh Mạng (BTL_ANM)
+ * Chức năng:
+ *   - Thực hiện sinh cặp khóa, mã hóa và giải mã trực tiếp trên trình duyệt của Alice & Bob.
+ *   - Sử dụng kiểu dữ liệu BigInt của JavaScript để đảm bảo độ chính xác số học tuyệt đối,
+ *     tránh hiện tượng tràn số khi thực hiện phép tính với các số nguyên lớn.
+ *   - Tạo ra dữ liệu theo dõi chi tiết (Mathematical Trace) phục vụ việc trực quan hóa
+ *     từng bước tính toán trên giao diện người dùng.
  */
 
 const MerkleHellmanCrypto = (function () {
+
+    // ============================================================
+    // PHẦN 1: CÁC THUẬT TOÁN TOÁN HỌC NỀN TẢNG (BIGINT)
+    // ============================================================
+
     /**
-     * Ước chung lớn nhất (Euclid)
+     * Thuật toán Euclid tìm Ước chung lớn nhất (GCD) giữa 2 số BigInt.
+     * Dùng để kiểm tra điều kiện nguyên tố cùng nhau: gcd(r, q) === 1.
      */
     function gcd(a, b) {
         let x = BigInt(a);
@@ -19,7 +32,9 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Thuật toán Euclid mở rộng: a*x + b*y = gcd(a, b)
+     * Thuật toán Euclid mở rộng (Extended Euclidean Algorithm).
+     * Tìm nghiệm nguyên (x, y) cho phương trình: a*x + b*y = gcd(a, b).
+     * Trả về object: { g: gcd, x: BigInt, y: BigInt }
      */
     function extendedGCD(a, b) {
         let aVal = BigInt(a);
@@ -34,11 +49,14 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Tìm nghịch đảo modulo: a * inv ≡ 1 (mod m)
+     * Thuật toán tìm Nghịch đảo Modulo: Tìm x sao cho (a * x) ≡ 1 (mod m).
+     * Sử dụng thuật toán Euclid mở rộng.
+     * Ném ra lỗi nếu gcd(a, m) !== 1 (không tồn tại nghịch đảo).
      */
     function modInverse(a, m) {
         let aVal = BigInt(a);
         let mVal = BigInt(m);
+        // Đưa về khoảng dương
         let aMod = ((aVal % mVal) + mVal) % mVal;
         let { g, x } = extendedGCD(aMod, mVal);
         if (g !== 1n) {
@@ -48,7 +66,9 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Kiểm tra dãy có siêu tăng hay không (mỗi số > tổng các số trước nó)
+     * Kiểm tra dãy số có thỏa mãn tính chất siêu tăng (superincreasing) hay không.
+     * Điều kiện: Mỗi phần tử phải lớn hơn tổng của tất cả các phần tử trước nó:
+     *   w[k] > sum(w[0] ... w[k-1]) với mọi k >= 1.
      */
     function isSuperincreasing(seq) {
         let total = 0n;
@@ -61,12 +81,14 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Sinh dãy siêu tăng ngẫu nhiên độ dài n
+     * Sinh ngẫu nhiên dãy siêu tăng bí mật w gồm n phần tử.
+     * Quy tắc: Mỗi phần tử = tổng trước đó + một số ngẫu nhiên dương.
      */
     function generateSuperincreasing(n = 8) {
         let seq = [];
         let total = 0n;
-        let current = BigInt(Math.floor(Math.random() * 8) + 2); // 2..9
+        // Phần tử đầu tiên ngẫu nhiên nhỏ từ 2 đến 9
+        let current = BigInt(Math.floor(Math.random() * 8) + 2);
         for (let i = 0; i < n; i++) {
             let randInc = BigInt(Math.floor(Math.random() * Math.max(3, Number(total / 2n) + 1)) + 1);
             current = total + randInc;
@@ -76,19 +98,29 @@ const MerkleHellmanCrypto = (function () {
         return seq;
     }
 
+    // ============================================================
+    // PHẦN 2: QUY TRÌNH SINH CẶP KHÓA (KEY GENERATION - 5 BƯỚC)
+    // ============================================================
+
     /**
-     * Sinh cặp khóa Merkle-Hellman ngẫu nhiên
+     * Sinh cặp khóa Merkle-Hellman ngẫu nhiên hoàn chỉnh.
+     * 
+     * Bước 1: Sinh dãy siêu tăng bí mật w gồm n phần tử.
+     * Bước 2: Chọn modulus q > tổng dãy w.
+     * Bước 3: Chọn hệ số nhân r sao cho gcd(r, q) = 1.
+     * Bước 4: Tính nghịch đảo r_inv = r⁻¹ mod q bằng Euclid mở rộng.
+     * Bước 5: Tính Khóa công khai beta = (r * w_i) mod q.
      */
     function generateKeyPair(n = 8) {
-        // 1. Dãy siêu tăng w (private)
+        // Bước 1: Dãy siêu tăng bí mật (Private Key component)
         let w = generateSuperincreasing(n);
 
-        // 2. Modulus q > sum(w)
+        // Bước 2: Modulus q bí mật (q > sum(w))
         let sumW = w.reduce((acc, v) => acc + v, 0n);
         let qAdd = BigInt(Math.floor(Math.random() * Number(sumW)) + Number(sumW / 2n) + 1);
         let q = sumW + qAdd;
 
-        // 3. Hệ số nhân r nguyên tố cùng nhau với q
+        // Bước 3: Hệ số nhân r bí mật thỏa mãn gcd(r, q) = 1
         let r = 0n;
         while (true) {
             let cand = BigInt(Math.floor(Math.random() * Number(q - 3n)) + 2);
@@ -98,10 +130,10 @@ const MerkleHellmanCrypto = (function () {
             }
         }
 
-        // 4. Nghịch đảo của r theo modulo q
+        // Bước 4: Tính nghịch đảo r⁻¹ mod q
         let r_inv = modInverse(r, q);
 
-        // 5. Khóa công khai beta = (r * w_i) mod q
+        // Bước 5: Tạo Khóa công khai beta_i = (r * w_i) mod q (Public Key)
         let beta = w.map(wi => (r * wi) % q);
 
         return {
@@ -119,14 +151,16 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Khóa kinh điển từ Wikipedia (dùng để đối chiếu/giảng dạy)
+     * Bộ khóa chuẩn từ Wikipedia (dùng để đối chiếu số liệu mẫu khi thuyết trình).
+     * w = [2, 7, 11, 21, 42, 89, 180, 354], q = 881, r = 588, r_inv = 442
+     * beta = [295, 592, 301, 14, 28, 353, 120, 236]
      */
     function getWikipediaKeys() {
         let w = [2, 7, 11, 21, 42, 89, 180, 354];
         let q = 881;
         let r = 588;
         let r_inv = Number(modInverse(r, q)); // 442
-        let beta = w.map(wi => Number((BigInt(r) * BigInt(wi)) % BigInt(q))); // [295, 592, 301, 14, 28, 353, 120, 236]
+        let beta = w.map(wi => Number((BigInt(r) * BigInt(wi)) % BigInt(q)));
 
         return {
             privateKey: {
@@ -141,6 +175,10 @@ const MerkleHellmanCrypto = (function () {
             n: 8
         };
     }
+
+    // ============================================================
+    // PHẦN 3: XỬ LÝ CHUYỂN ĐỔI BIT & KÝ TỰ
+    // ============================================================
 
     /**
      * Chuyển chuỗi văn bản thành danh sách byte UTF-8
@@ -157,7 +195,7 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Chuyển 1 byte (0..255) thành mảng 8 bit [b0, b1, ..., b7] (MSB -> LSB)
+     * Chuyển một byte số nguyên (0..255) thành mảng 8 bit [b0, b1, ..., b7] (MSB -> LSB)
      */
     function byteToBits(b) {
         let bits = [];
@@ -168,7 +206,7 @@ const MerkleHellmanCrypto = (function () {
     }
 
     /**
-     * Chuyển mảng 8 bit thành 1 byte số nguyên
+     * Chuyển mảng 8 bit [b0, b1, ..., b7] trở lại thành giá trị byte (0..255)
      */
     function bitsToByte(bits) {
         let val = 0;
@@ -178,9 +216,21 @@ const MerkleHellmanCrypto = (function () {
         return val;
     }
 
+    // ============================================================
+    // PHẦN 4: THUẬT TOÁN MÃ HÓA (ENCRYPTION TẠI CLIENT)
+    // ============================================================
+
     /**
-     * Mã hóa văn bản sử dụng khóa công khai beta
-     * Trả về cả ciphertext và mảng chi tiết các bước toán học (trace) để trực quan hóa
+     * Mã hóa văn bản sử dụng Khóa công khai beta của người nhận.
+     * 
+     * Quy trình từng bước:
+     *   Bước 1: Chuyển chuỗi văn bản thành các byte UTF-8 / ASCII.
+     *   Bước 2: Chuyển mỗi byte thành mảng 8 bit [b0, b1, ..., b7].
+     *   Bước 3: Với mỗi khối 8 bit, tính tổng tích vô hướng:
+     *           c = sum(b_i * beta_i) với i từ 0 đến 7.
+     *   Bước 4: Lưu vết chi tiết (trace) phục vụ bảng soi bước toán học trên giao diện.
+     * 
+     * Trả về: { ciphertext: [c1, c2, ...], steps: [thông tin chi tiết từng bước] }
      */
     function encrypt(text, beta) {
         if (!beta || !beta.length) {
@@ -190,12 +240,14 @@ const MerkleHellmanCrypto = (function () {
         let ciphertext = [];
         let steps = [];
 
+        // Duyệt qua từng byte của văn bản
         for (let idx = 0; idx < bytes.length; idx++) {
             let b = bytes[idx];
-            let bits = byteToBits(b);
+            let bits = byteToBits(b); // 8 bit nhị phân
             let sum = 0n;
             let bitCalculations = [];
 
+            // Tính tích vô hướng: c = Σ (b_i * beta_i)
             for (let i = 0; i < 8; i++) {
                 let bitVal = bits[i];
                 let betaVal = BigInt(beta[i] || 0);
@@ -213,9 +265,10 @@ const MerkleHellmanCrypto = (function () {
             let cipherVal = Number(sum);
             ciphertext.push(cipherVal);
 
-            // Ký tự hiển thị (nếu ký tự ASCII in được hoặc placeholder)
+            // Ký tự hiển thị (định dạng ký tự ASCII in được hoặc mã hex)
             let charRepr = (b >= 32 && b <= 126) ? String.fromCharCode(b) : `0x${b.toString(16).toUpperCase()}`;
 
+            // Lưu vết chi tiết từng phép toán phục vụ Modal visualizer
             steps.push({
                 byteIndex: idx,
                 char: charRepr,
@@ -234,9 +287,23 @@ const MerkleHellmanCrypto = (function () {
         };
     }
 
+    // ============================================================
+    // PHẦN 5: THUẬT TOÁN GIẢI MÃ (DECRYPTION TẠI CLIENT)
+    // ============================================================
+
     /**
-     * Giải mã danh sách ciphertext bằng khóa bí mật (w, q, r_inv)
-     * Trả về chuỗi bản rõ và mảng chi tiết các bước toán học giải bài toán Knapsack
+     * Giải mã danh sách ciphertext bằng Khóa riêng bí mật (w, q, r_inv).
+     * 
+     * Quy trình từng bước:
+     *   Bước 1: Áp dụng 'Cửa sập' Trapdoor: Tính c' = (c * r_inv) mod q.
+     *           Phép nhân này biến bài toán Knapsack tổng quát thành bài toán Knapsack
+     *           trên dãy siêu tăng w: c' = sum(b_i * w_i).
+     *   Bước 2: Áp dụng Thuật toán Tham lam (Greedy Knapsack):
+     *           Duyệt từ phần tử lớn nhất w[7] lùi về w[0]:
+     *           - Nếu w[i] <= remaining: Đặt bit b[i] = 1, trừ remaining đi w[i].
+     *           - Ngược lại: Đặt bit b[i] = 0.
+     *   Bước 3: Kiểm tra nếu remaining !== 0 thì phát hiện dữ liệu bị hỏng hoặc bị sửa đổi.
+     *   Bước 4: Ghép 8 bit thành mã byte và giải mã trở lại thành ký tự ban đầu.
      */
     function decrypt(ciphertext, privateKey) {
         let { w, q, r_inv } = privateKey;
@@ -251,12 +318,14 @@ const MerkleHellmanCrypto = (function () {
         let recoveredBytes = [];
         let steps = [];
 
+        // Duyệt qua từng số nguyên lớn trong ciphertext
         for (let idx = 0; idx < ciphertext.length; idx++) {
             let c = BigInt(ciphertext[idx]);
-            // 1. Biến đổi c' = (c * r^-1) mod q
+
+            // Bước 1: Biến đổi về bài toán siêu tăng c' = (c * r_inv) mod q
             let c_prime = (c * rInvBig) % qBig;
 
-            // 2. Thuật toán tham lam giải bài toán dãy siêu tăng (Greedy Knapsack)
+            // Bước 2: Thuật toán tham lam giải bài toán dãy siêu tăng (Greedy Knapsack)
             let bits = new Array(w.length).fill(0);
             let remaining = c_prime;
             let knapsackTrace = [];
@@ -272,6 +341,7 @@ const MerkleHellmanCrypto = (function () {
                     taken = true;
                 }
 
+                // Ghi lại từng quyết định chọn/bỏ để hiển thị lên bảng giải thích
                 knapsackTrace.push({
                     index: i,
                     weight: Number(wi),
@@ -281,10 +351,12 @@ const MerkleHellmanCrypto = (function () {
                 });
             }
 
+            // Bước 3: Kiểm tra tính toàn vẹn dữ liệu
             if (remaining !== 0n) {
                 throw new Error(`Giải mã lỗi ở khối ${idx}: Cipher ${c} không giải được về dãy siêu tăng w (dữ liệu có thể bị lỗi hoặc sai khóa).`);
             }
 
+            // Bước 4: Chuyển 8 bit thành byte
             let byteVal = bitsToByte(bits);
             recoveredBytes.push(byteVal);
 
@@ -303,6 +375,7 @@ const MerkleHellmanCrypto = (function () {
             });
         }
 
+        // Tái tạo lại chuỗi văn bản hoàn chỉnh
         let plaintext = bytesToText(recoveredBytes);
 
         return {
@@ -312,6 +385,7 @@ const MerkleHellmanCrypto = (function () {
         };
     }
 
+    // Xuất các phương thức công khai
     return {
         gcd,
         extendedGCD,
@@ -333,4 +407,3 @@ const MerkleHellmanCrypto = (function () {
 if (typeof module !== "undefined" && module.exports) {
     module.exports = MerkleHellmanCrypto;
 }
-
